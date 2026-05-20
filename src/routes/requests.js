@@ -1,0 +1,219 @@
+import { Router } from 'express';
+import { db } from '../db.js';
+import { requireAuth, requireAdmin } from '../auth.js';
+import {
+  findLeaveType,
+  parseFlexibleDate,
+  daysBetween,
+  quotaForUser,
+  computeTenureYears,
+  LEAVE_TYPES,
+} from '../leaveTypes.js';
+
+const LEAVE_LABELS = LEAVE_TYPES.map((t) => t.label);
+
+const router = Router();
+
+const parseRow = (r) => r && ({
+  id: r.id,
+  ownerKey: r.owner_key,
+  ownerId: r.owner_id,
+  ownerName: r.owner_name,
+  employeeId: r.owner_key,
+  userId: r.owner_id,
+  userName: r.owner_name,
+  type: r.type,
+  detail: r.detail,
+  status: r.status,
+  date: r.date,
+  dateKey: r.date_key,
+  startDateKey: r.start_date_key,
+  endDateKey: r.end_date_key,
+  days: r.days,
+  approver: r.approver,
+  approverLevels: (() => { try { return JSON.parse(r.approver_levels_json || '[]'); } catch { return []; } })(),
+  createdAt: r.created_at,
+  ...((() => { try { return JSON.parse(r.payload_json || '{}'); } catch { return {}; } })()),
+});
+
+const todayStart = () => {
+  const n = new Date();
+  return new Date(n.getFullYear(), n.getMonth(), n.getDate());
+};
+
+// Sum days already booked (approved + pending) for this user, this leave type, this year.
+function usedDaysThisYear(userId, leaveLabel) {
+  const yearPrefix = String(new Date().getFullYear());
+  const rows = db.prepare(`
+    SELECT days, start_date_key FROM requests
+    WHERE owner_id = ? AND type = ? AND status IN ('approved', 'pending')
+  `).all(userId, leaveLabel);
+  return rows
+    .filter((r) => (r.start_date_key || '').startsWith(yearPrefix))
+    .reduce((sum, r) => sum + (Number(r.days) || 0), 0);
+}
+
+// Validate the leave-specific business rules. Returns null on success, or { error } on failure.
+function validateLeaveRequest({ owner, leaveCfg, body }) {
+  const today = todayStart();
+  const start = parseFlexibleDate(body.startDateKey);
+  const end = parseFlexibleDate(body.endDateKey) || start;
+  if (!start) return { error: 'invalid start date' };
+  if (end < start) return { error: 'end date must be on or after start date' };
+
+  const days = Number(body.days);
+  if (!Number.isFinite(days) || days <= 0) return { error: 'days must be > 0' };
+
+  // Advance notice
+  const leadDays = daysBetween(today, start);
+  if (leaveCfg.advanceDays > 0 && leadDays < leaveCfg.advanceDays) {
+    return { error: `${leaveCfg.labelTh}: ต้องขอล่วงหน้าอย่างน้อย ${leaveCfg.advanceDays} วัน` };
+  }
+  // Backdate window
+  if (leadDays < 0) {
+    const allowedBack = leaveCfg.backdateDays || 0;
+    if (-leadDays > allowedBack) {
+      return allowedBack > 0
+        ? { error: `${leaveCfg.labelTh}: ลาย้อนหลังได้ไม่เกิน ${allowedBack} วัน` }
+        : { error: `${leaveCfg.labelTh}: ไม่อนุญาตให้ลาย้อนหลัง` };
+    }
+  }
+
+  // Annual leave: tenure ≥ 1 year
+  if (leaveCfg.id === 'annual') {
+    const tenureYears = computeTenureYears(owner.start_date);
+    if (tenureYears < (leaveCfg.minTenureYears || 1)) {
+      return { error: 'ลาพักร้อน: ใช้สิทธิได้เมื่ออายุงานครบ 1 ปี' };
+    }
+  }
+
+  // Sick leave: 3+ consecutive days requires medical certificate attachment
+  if (leaveCfg.id === 'sick' && leaveCfg.certificateAfterDays) {
+    if (days >= leaveCfg.certificateAfterDays && !body.medicalCertificate) {
+      return { error: 'ลาป่วยติดต่อกัน 3 วันขึ้นไป ต้องแนบหนังสือรับรองแพทย์' };
+    }
+  }
+
+  // Compensation leave: must specify the holiday work date
+  if (leaveCfg.requiresHolidayWorkDate && !body.holidayWorkDate) {
+    return { error: 'ลาชดเชยทำงานวันหยุด: ต้องระบุวันที่ทำงานในวันหยุด' };
+  }
+
+  // Paternity: must use within N days from child birth date
+  if (leaveCfg.requiresChildBirthDate) {
+    const birth = parseFlexibleDate(body.childBirthDate);
+    if (!birth) return { error: 'ลาคลอด (พนักงานชาย): ต้องระบุวันที่บุตรคลอด' };
+    const sinceBirth = daysBetween(birth, start);
+    if (sinceBirth < 0) {
+      return { error: 'ลาคลอด (พนักงานชาย): วันเริ่มลาต้องไม่ก่อนวันที่บุตรคลอด' };
+    }
+    if (sinceBirth > leaveCfg.useWithinDaysFromChildBirth) {
+      return { error: `ลาคลอด (พนักงานชาย): ต้องใช้สิทธิภายใน ${leaveCfg.useWithinDaysFromChildBirth} วันนับจากวันที่บุตรคลอด` };
+    }
+  }
+
+  // Quota check
+  const quota = quotaForUser(leaveCfg.id, owner);
+  if (quota > 0) {
+    const used = usedDaysThisYear(owner.id, leaveCfg.label);
+    if (used + days > quota) {
+      return { error: `${leaveCfg.labelTh}: เกินสิทธิ (คงเหลือ ${Math.max(quota - used, 0)} วัน)` };
+    }
+  }
+  return null;
+}
+
+router.get('/', requireAuth, (req, res) => {
+  let rows;
+  if (req.user.role === 'admin' || req.query.all === '1') {
+    rows = db.prepare('SELECT * FROM requests ORDER BY created_at DESC').all();
+  } else if (req.query.scope === 'approver') {
+    const me = db.prepare('SELECT department, employee_level FROM users WHERE id = ?').get(req.user.sub);
+    const lvl = me?.employee_level || '';
+    if (lvl === 'Board Level' || lvl === 'Director Level') {
+      rows = db.prepare(`
+        SELECT * FROM requests
+        WHERE owner_id = ? OR approver_levels_json LIKE ?
+        ORDER BY created_at DESC
+      `).all(req.user.sub, `%"${lvl}"%`);
+    } else if (me?.department) {
+      const placeholders = LEAVE_LABELS.map(() => '?').join(',');
+      rows = db.prepare(`
+        SELECT r.* FROM requests r
+        LEFT JOIN users u ON u.id = r.owner_id
+        WHERE r.owner_id = ?
+           OR (r.status = 'approved' AND u.department = ? AND r.type IN (${placeholders}))
+        ORDER BY r.created_at DESC
+      `).all(req.user.sub, me.department, ...LEAVE_LABELS);
+    } else {
+      rows = db.prepare('SELECT * FROM requests WHERE owner_id = ? ORDER BY created_at DESC').all(req.user.sub);
+    }
+  } else {
+    rows = db.prepare('SELECT * FROM requests WHERE owner_id = ? ORDER BY created_at DESC').all(req.user.sub);
+  }
+  res.json(rows.map(parseRow));
+});
+
+router.post('/', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const owner = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.sub);
+  if (!owner) return res.status(404).json({ error: 'owner missing' });
+
+  // Leave-specific validation: only fire when the type matches a known leave label.
+  const leaveCfg = findLeaveType(b.type);
+  if (leaveCfg) {
+    const err = validateLeaveRequest({ owner, leaveCfg, body: b });
+    if (err) return res.status(400).json(err);
+  }
+
+  const id = b.id || `REQ-${String(Date.now()).slice(-6)}`;
+  const payload = { ...b };
+  ['id','type','detail','status','date','dateKey','startDateKey','endDateKey','days','approver','approverLevels','ownerKey','ownerId','ownerName','employeeId','userId','userName','email'].forEach((k) => delete payload[k]);
+
+  db.prepare(`
+    INSERT INTO requests (id, owner_id, owner_key, owner_name, type, detail, status,
+      date, date_key, start_date_key, end_date_key, days, approver, approver_levels_json, payload_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id, owner.id, owner.employee_id, owner.name_th,
+    b.type || '', b.detail || '', b.status || 'pending',
+    b.date || '', b.dateKey || '', b.startDateKey || '', b.endDateKey || '',
+    b.days ?? null, b.approver || '', JSON.stringify(b.approverLevels || []),
+    JSON.stringify(payload)
+  );
+  res.status(201).json(parseRow(db.prepare('SELECT * FROM requests WHERE id = ?').get(id)));
+});
+
+router.patch('/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM requests WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'not found' });
+  const me = db.prepare('SELECT employee_level FROM users WHERE id = ?').get(req.user.sub);
+  const lvl = me?.employee_level || '';
+  const approverLevels = (() => { try { return JSON.parse(row.approver_levels_json || '[]'); } catch { return []; } })();
+  const isOwner = row.owner_id === req.user.sub;
+  const isAssignedApprover = approverLevels.includes(lvl);
+  if (req.user.role !== 'admin' && !isOwner && !isAssignedApprover) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const status = req.body?.status;
+  if (status && !['pending','approved','rejected'].includes(status)) {
+    return res.status(400).json({ error: 'bad status' });
+  }
+  if (status && (status === 'approved' || status === 'rejected') && isOwner && !isAssignedApprover && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'cannot self-approve' });
+  }
+  if (status) {
+    db.prepare(`UPDATE requests SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(status, req.params.id);
+  }
+  res.json(parseRow(db.prepare('SELECT * FROM requests WHERE id = ?').get(req.params.id)));
+});
+
+router.delete('/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM requests WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'not found' });
+  if (req.user.role !== 'admin' && row.owner_id !== req.user.sub) return res.status(403).json({ error: 'forbidden' });
+  db.prepare('DELETE FROM requests WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+export default router;
