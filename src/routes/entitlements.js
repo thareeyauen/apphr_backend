@@ -37,6 +37,21 @@ function buildEntitlements(user, row) {
   return out;
 }
 
+// Catalog of all known leave types (definition shared with the user app).
+// Returned to admin UI so it can render the full set instead of a hardcoded subset.
+router.get('/types', requireAuth, (_req, res) => {
+  res.json(LEAVE_TYPES.map((t) => ({
+    id: t.id,
+    label: t.label,
+    labelTh: t.labelTh,
+    quota: t.quota,
+    quotaByTenureYears: t.quotaByTenureYears || null,
+    minTenureYears: t.minTenureYears || 0,
+    advanceDays: t.advanceDays || 0,
+    backdateDays: t.backdateDays || 0,
+  })));
+});
+
 router.get('/', requireAuth, (_req, res) => {
   const rows = db.prepare('SELECT * FROM entitlements').all();
   const users = db.prepare('SELECT id, start_date FROM users').all();
