@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+﻿import Database from 'better-sqlite3';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
@@ -126,6 +126,8 @@ function ensureColumn(table, column, definition) {
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 ensureColumn('entitlements', 'entitlements_json', "TEXT NOT NULL DEFAULT '{}'");
+ensureColumn('users', 'approver_user_ids_json', "TEXT NOT NULL DEFAULT '[]'");
+ensureColumn('users', 'company_json', "TEXT NOT NULL DEFAULT '{}'");
 
 export function userRowToProfile(row) {
   if (!row) return null;
@@ -139,7 +141,9 @@ export function userRowToProfile(row) {
     initial: row.initial,
     label: row.employee_level,
     position: row.position_th,
+    approverUserIds: parse(row.approver_user_ids_json, []),
     profile: {
+      company: parse(row.company_json, {}),
       user: {
         prefix: row.prefix || '',
         nameTh: row.name_th || '',
@@ -181,3 +185,5 @@ export function userRowToProfile(row) {
     },
   };
 }
+
+

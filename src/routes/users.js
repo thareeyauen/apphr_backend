@@ -1,4 +1,4 @@
-import { Router } from 'express';
+﻿import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { db, userRowToProfile } from '../db.js';
 import { requireAuth, requireAdmin } from '../auth.js';
@@ -41,6 +41,7 @@ function flattenPatch(patch = {}) {
   const out = {};
   const user = patch.profile?.user;
   const job = patch.profile?.job;
+  const company = patch.profile?.company;
   const bank = job?.bank;
   const merge = (src, prefix = '') => {
     if (!src) return;
@@ -65,6 +66,7 @@ function flattenPatch(patch = {}) {
   if (user?.education !== undefined) out.education_json = JSON.stringify(user.education);
   if (job?.positionHistory !== undefined) out.position_history_json = JSON.stringify(job.positionHistory);
   if (job?.benefits !== undefined) out.benefits_json = JSON.stringify(job.benefits);
+  if (company !== undefined) out.company_json = JSON.stringify(company);
   return out;
 }
 
@@ -91,6 +93,16 @@ router.patch('/:id', requireAuth, (req, res) => {
   const updates = flattenPatch(req.body || {});
   // Password changes must go through PATCH /users/:id/password (which verifies currentPassword).
   // Silently ignore any `password` field on the generic patch route to prevent bypass.
+
+  // Approver mapping â€” admin only. Accepted as array of user ids (1-2 entries).
+  if (Array.isArray(req.body?.approverUserIds)) {
+    if (req.user.role !== 'admin') return res.status(403).json({ error: 'admin only' });
+    const ids = req.body.approverUserIds
+      .map((v) => (v == null ? '' : String(v).trim()))
+      .filter(Boolean)
+      .slice(0, 2);
+    updates.approver_user_ids_json = JSON.stringify(ids);
+  }
 
   if (Object.keys(updates).length) {
     const cols = Object.keys(updates);
@@ -172,3 +184,5 @@ router.delete('/:id', requireAuth, requireAdmin, (req, res) => {
 });
 
 export default router;
+
+
