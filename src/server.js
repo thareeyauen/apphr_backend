@@ -2,9 +2,12 @@ import express from 'express';
 import cors from 'cors';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
+import adminRoutes from './routes/admins.js';
 import requestRoutes from './routes/requests.js';
 import entitlementRoutes from './routes/entitlements.js';
 import checkinRoutes from './routes/checkins.js';
+import settingsRoutes from './routes/settings.js';
+import lookupsRoutes from './routes/lookups.js';
 
 const app = express();
 app.use(cors());
@@ -14,9 +17,12 @@ app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/admins', adminRoutes);
 app.use('/api/requests', requestRoutes);
 app.use('/api/entitlements', entitlementRoutes);
 app.use('/api/checkins', checkinRoutes);
+app.use('/api/settings', settingsRoutes);
+app.use('/api/lookups', lookupsRoutes);
 
 app.use((err, _req, res, _next) => {
   console.error(err);

@@ -9,6 +9,7 @@
     "seed": "node src/seed.js",
     "reset": "node src/seed.js --reset",
     "seed:supabase": "node src/supabase/seed.js",
+    "seed:users": "node src/supabase/seed-users.js",
     "test:supabase": "node src/supabase/test-connection.js"
   },
   "dependencies": {

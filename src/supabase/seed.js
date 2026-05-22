@@ -11,11 +11,13 @@ const CHECK_ICON = '✓';
 const CROSS = '✗';
 
 async function upsertByCode(table, rows) {
-  const { data, error } = await supabase
-    .from(table)
-    .upsert(rows, { onConflict: 'code', ignoreDuplicates: false })
-    .select('id, code');
-  if (error) throw new Error(`[${table}] ${error.message}`);
+  for (const row of rows) {
+    const { error } = await supabase
+      .from(table)
+      .upsert(row, { onConflict: 'code', ignoreDuplicates: false });
+    if (error) throw new Error(`[${table}:${row.code}] ${error.message}\nRow: ${JSON.stringify(row)}`);
+  }
+  const { data } = await supabase.from(table).select('id, code');
   return data;
 }
 
@@ -124,19 +126,19 @@ async function main() {
   // Mirrors LEAVE_TYPES in /apphr/src/leaveTypes.js
   console.log('• leave_types');
   await upsertByCode('leave_types', [
-    { code: 'PERSONAL',     name_th: 'ลากิจ',                        default_days_per_year: 4,   advance_notice_days: 3,  gender_eligibility: 'all',    min_service_months: 0,  allow_carry_over: false },
-    { code: 'SICK',         name_th: 'ลาป่วย',                        default_days_per_year: 30,  advance_notice_days: 0,  gender_eligibility: 'all',    min_service_months: 0,  allow_carry_over: false, requires_doctor_cert: false, use_within_days_from_event: null },
-    { code: 'ANNUAL',       name_th: 'ลาพักร้อน',                    default_days_per_year: null, advance_notice_days: 7, gender_eligibility: 'all',    min_service_months: 12, allow_carry_over: true,  max_carry_over_days: 20, convert_excess_to_cash: true,
+    { code: 'PERSONAL',     name_th: 'ลากิจ',                             default_days_per_year: 4,    advance_notice_days: 3,  gender_eligibility: 'all',    min_service_months: 0,  allow_carry_over: false, requires_doctor_cert: false },
+    { code: 'SICK',         name_th: 'ลาป่วย',                             default_days_per_year: 30,   advance_notice_days: 0,  gender_eligibility: 'all',    min_service_months: 0,  allow_carry_over: false, requires_doctor_cert: false },
+    { code: 'ANNUAL',       name_th: 'ลาพักร้อน',                         default_days_per_year: null,  advance_notice_days: 7,  gender_eligibility: 'all',    min_service_months: 12, allow_carry_over: true,  max_carry_over_days: 20, convert_excess_to_cash: true, requires_doctor_cert: false,
       accrual_rule: { tiers: [{ minYears: 1, maxYears: 3, days: 7 }, { minYears: 3, maxYears: 5, days: 10 }, { minYears: 5, maxYears: null, days: 15 }] }
     },
-    { code: 'MATERNITY',    name_th: 'ลาคลอด',                        default_days_per_year: 120, advance_notice_days: 30, gender_eligibility: 'female', min_service_months: 0,  allow_carry_over: false },
-    { code: 'PATERNITY',    name_th: 'ลาคลอด (พนักงานชาย)',          default_days_per_year: 15,  advance_notice_days: 30, gender_eligibility: 'male',   min_service_months: 0,  allow_carry_over: false, use_within_days_from_event: 90 },
-    { code: 'COMPENSATION', name_th: 'ลาชดเชยทำงานวันหยุด',           default_days_per_year: null, advance_notice_days: 3,  gender_eligibility: 'all',    min_service_months: 0,  allow_carry_over: false },
-    { code: 'ORDINATION',   name_th: 'ลาบวช / ลาปฏิบัติหน้าที่ทางศาสนา', default_days_per_year: 15, advance_notice_days: 30, gender_eligibility: 'all',    min_service_months: 0,  allow_carry_over: false },
-    { code: 'UNPAID',       name_th: 'ลาไม่รับค่าจ้าง',               default_days_per_year: 30,  advance_notice_days: 30, gender_eligibility: 'all',    min_service_months: 0,  allow_carry_over: false },
-    { code: 'STERILIZATION',name_th: 'ลาทำหมัน',                       default_days_per_year: 5,   advance_notice_days: 3,  gender_eligibility: 'all',    min_service_months: 0,  allow_carry_over: false },
-    { code: 'TRAINING',     name_th: 'ลาฝึกอบรม',                      default_days_per_year: 30,  advance_notice_days: 3,  gender_eligibility: 'all',    min_service_months: 0,  allow_carry_over: false },
-    { code: 'MILITARY',     name_th: 'ลาราชการทหาร',                   default_days_per_year: 60,  advance_notice_days: 30, gender_eligibility: 'male',   min_service_months: 0,  allow_carry_over: false },
+    { code: 'MATERNITY',    name_th: 'ลาคลอด',                             default_days_per_year: 120,  advance_notice_days: 30, gender_eligibility: 'female', min_service_months: 0,  allow_carry_over: false, requires_doctor_cert: false },
+    { code: 'PATERNITY',    name_th: 'ลาคลอด (พนักงานชาย)',               default_days_per_year: 15,   advance_notice_days: 30, gender_eligibility: 'male',   min_service_months: 0,  allow_carry_over: false, requires_doctor_cert: false, use_within_days_from_event: 90 },
+    { code: 'COMPENSATION', name_th: 'ลาชดเชยทำงานวันหยุด',                default_days_per_year: null,  advance_notice_days: 3,  gender_eligibility: 'all',    min_service_months: 0,  allow_carry_over: false, requires_doctor_cert: false },
+    { code: 'ORDINATION',   name_th: 'ลาบวช / ลาปฏิบัติหน้าที่ทางศาสนา', default_days_per_year: 15,   advance_notice_days: 30, gender_eligibility: 'all',    min_service_months: 0,  allow_carry_over: false, requires_doctor_cert: false },
+    { code: 'UNPAID',       name_th: 'ลาไม่รับค่าจ้าง',                    default_days_per_year: 30,   advance_notice_days: 30, gender_eligibility: 'all',    min_service_months: 0,  allow_carry_over: false, requires_doctor_cert: false },
+    { code: 'STERILIZATION',name_th: 'ลาทำหมัน',                           default_days_per_year: 5,    advance_notice_days: 3,  gender_eligibility: 'all',    min_service_months: 0,  allow_carry_over: false, requires_doctor_cert: false },
+    { code: 'TRAINING',     name_th: 'ลาฝึกอบรม',                          default_days_per_year: 30,   advance_notice_days: 3,  gender_eligibility: 'all',    min_service_months: 0,  allow_carry_over: false, requires_doctor_cert: false },
+    { code: 'MILITARY',     name_th: 'ลาราชการทหาร',                       default_days_per_year: 60,   advance_notice_days: 30, gender_eligibility: 'male',   min_service_months: 0,  allow_carry_over: false, requires_doctor_cert: false },
   ]);
   console.log(`  ${CHECK_ICON} 11 rows`);
 

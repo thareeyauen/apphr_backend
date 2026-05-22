@@ -1,31 +1,39 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import { db, userRowToProfile } from '../db.js';
 import { signToken, requireAuth } from '../auth.js';
+import { getUserByEmail, getUserById } from '../supabase/queries.js';
 
 const router = Router();
 
-function authenticate(req, res, expectedRole) {
+async function authenticate(req, res, expectedRole) {
   const { email, password } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'email and password required' });
-  const row = db.prepare('SELECT * FROM users WHERE email = ?').get(email.trim().toLowerCase());
-  if (!row) return res.status(401).json({ error: 'invalid credentials' });
-  if (!bcrypt.compareSync(password, row.password_hash)) return res.status(401).json({ error: 'invalid credentials' });
-  if (row.role !== expectedRole) return res.status(403).json({ error: 'wrong portal for this account' });
-  const token = signToken({ sub: row.id, role: row.role, email: row.email });
-  res.json({ token, user: userRowToProfile(row) });
+
+  const result = await getUserByEmail(email);
+  if (!result) return res.status(401).json({ error: 'invalid credentials' });
+  if (!bcrypt.compareSync(password, result.passwordHash)) return res.status(401).json({ error: 'invalid credentials' });
+  if (result.role !== expectedRole) return res.status(403).json({ error: 'wrong portal for this account' });
+
+  // empId added to JWT so routes can access employees.id without extra query
+  const token = signToken({ sub: result.userId, empId: result.empId, role: result.role, email: result.profile.email });
+  res.json({ token, user: result.profile });
 }
 
-// Employee portal — rejects admin accounts.
-router.post('/login', (req, res) => authenticate(req, res, 'employee'));
+router.post('/login', (req, res) =>
+  authenticate(req, res, 'employee').catch(err => res.status(500).json({ error: err.message }))
+);
+router.post('/admin/login', (req, res) =>
+  authenticate(req, res, 'admin').catch(err => res.status(500).json({ error: err.message }))
+);
 
-// Admin portal — rejects employee accounts.
-router.post('/admin/login', (req, res) => authenticate(req, res, 'admin'));
-
-router.get('/me', requireAuth, (req, res) => {
-  const row = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.sub);
-  if (!row) return res.status(404).json({ error: 'user gone' });
-  res.json({ user: userRowToProfile(row) });
+router.get('/me', requireAuth, async (req, res) => {
+  try {
+    const profile = await getUserById(req.user.sub);
+    if (!profile) return res.status(404).json({ error: 'user gone' });
+    res.json({ user: profile });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 export default router;
