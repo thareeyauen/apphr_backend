@@ -9,6 +9,7 @@ import {
 } from '../leaveTypes.js';
 import {
   getRequests,
+  getDeletedRequests,
   getRequestById,
   getRequestRaw,
   createLeaveRequest,
@@ -104,6 +105,15 @@ async function validateLeaveRequest({ owner, leaveCfg, body }) {
 }
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
+
+router.get('/deleted', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const rows = await getDeletedRequests();
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.get('/', requireAuth, async (req, res) => {
   try {
@@ -262,7 +272,8 @@ router.delete('/:id', requireAuth, async (req, res) => {
     if (req.user.role !== 'admin' && found.raw.employee_id !== empIdOf(req)) {
       return res.status(403).json({ error: 'forbidden' });
     }
-    await found.deleter(req.params.id);
+    const isAdmin = req.user.role === 'admin';
+    await found.deleter(req.params.id, isAdmin);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

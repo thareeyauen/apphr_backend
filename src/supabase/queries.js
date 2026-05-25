@@ -359,6 +359,18 @@ export async function getEmploymentTypes() {
   return (data || []).map(r => r.name_th);
 }
 
+export async function getPositions() {
+  const sb = supabase();
+  const { data } = await sb.from('positions').select('id, name_th').order('name_th');
+  return (data || []).map(r => r.name_th);
+}
+
+export async function getBanks() {
+  const sb = supabase();
+  const { data } = await sb.from('banks').select('id, name_th').order('name_th');
+  return (data || []).map(r => r.name_th);
+}
+
 export async function getDocumentRequestTypes() {
   const sb = supabase();
   const { data } = await sb.from('document_request_types')
@@ -881,7 +893,8 @@ async function buildApproverNameMap(sb, empIds) {
 export async function getLeaveRequests({ scope, all } = {}, userId, empId, role) {
   const sb = supabase();
   let query = sb.from('leave_requests')
-    .select('id, request_code, employee_id, leave_type_id, reason, total_days, status, submitted_at, created_at, leave_types(code), leave_request_periods(leave_date, days)');
+    .select('id, request_code, employee_id, leave_type_id, reason, total_days, status, submitted_at, created_at, leave_types(code), leave_request_periods(leave_date, days)')
+    .is('deleted_at', null);
 
   if (role !== 'admin' && all !== '1') {
     if (scope === 'approver') {
@@ -936,7 +949,7 @@ export async function getRequestById(reqId) {
   const sb = supabase();
   const { data: r, error } = await sb.from('leave_requests')
     .select('id, request_code, employee_id, leave_type_id, reason, total_days, status, submitted_at, created_at, leave_types(code), leave_request_periods(leave_date, days)')
-    .eq('id', reqId).maybeSingle();
+    .eq('id', reqId).is('deleted_at', null).maybeSingle();
   if (error || !r) return null;
   const [empMap, mappings] = await Promise.all([
     buildEmpMap(sb, [r.employee_id]),
@@ -956,7 +969,7 @@ export async function getRequestById(reqId) {
 
 export async function getRequestRaw(reqId) {
   const sb = supabase();
-  const { data } = await sb.from('leave_requests').select('id, employee_id, status').eq('id', reqId).maybeSingle();
+  const { data } = await sb.from('leave_requests').select('id, employee_id, status').eq('id', reqId).is('deleted_at', null).maybeSingle();
   return data;
 }
 
@@ -1036,11 +1049,9 @@ export async function updateRequest(reqId, updates, approverEmpId) {
   return getRequestById(reqId);
 }
 
-export async function deleteRequest(reqId) {
+export async function deleteRequest(reqId, isAdmin = false) {
   const sb = supabase();
-  await sb.from('leave_request_periods').delete().eq('leave_request_id', reqId);
-  await sb.from('approvals').delete().eq('request_id', reqId).eq('request_type', 'leave');
-  await sb.from('leave_requests').delete().eq('id', reqId);
+  await sb.from('leave_requests').update({ deleted_at: new Date().toISOString(), deleted_by_admin: isAdmin }).eq('id', reqId);
 }
 
 // Used by requests route for quota validation
@@ -1502,10 +1513,10 @@ export async function updateAttendanceExceptionRequest(reqId, updates, approverE
   return getAttendanceExceptionRequestById(reqId);
 }
 
-export async function deleteAttendanceExceptionRequest(reqId) {
+export async function deleteAttendanceExceptionRequest(reqId, isAdmin = false) {
   const sb = supabase();
   await sb.from('attendance_exception_requests')
-    .update({ deleted_at: new Date().toISOString() }).eq('id', reqId);
+    .update({ deleted_at: new Date().toISOString(), deleted_by_admin: isAdmin }).eq('id', reqId);
 }
 
 // ─── Document requests ───────────────────────────────────────────────────────
@@ -1556,15 +1567,9 @@ export async function getDocumentRequestById(reqId) {
     .select('*, document_request_types(code, name_th)')
     .eq('id', reqId).is('deleted_at', null).maybeSingle();
   if (!r) return null;
-  const [empMap, approverNameMap] = await Promise.all([
-    buildEmpMap(sb, [r.employee_id]),
-    buildApproverNameMap(sb, [r.employee_id]),
-  ]);
+  const empMap = await buildEmpMap(sb, [r.employee_id]);
   const parsed = parseDocumentRequest(r, empMap);
-  if (parsed) {
-    const names = approverNameMap[r.employee_id];
-    parsed.approver = names?.length ? names.join(' / ') : 'แอดมิน';
-  }
+  if (parsed) parsed.approver = 'Admin';
   return parsed;
 }
 
@@ -1585,15 +1590,11 @@ export async function getDocumentRequests({ scope, all } = {}, userId, empId, ro
   if (error) throw error;
 
   const empIds = [...new Set((rows || []).map(r => r.employee_id))];
-  const [empMap, approverNameMap] = await Promise.all([
-    buildEmpMap(sb, empIds),
-    buildApproverNameMap(sb, empIds),
-  ]);
+  const empMap = await buildEmpMap(sb, empIds);
   return (rows || []).map(r => {
     const parsed = parseDocumentRequest(r, empMap);
     if (!parsed) return null;
-    const names = approverNameMap[r.employee_id];
-    parsed.approver = names?.length ? names.join(' / ') : 'แอดมิน';
+    parsed.approver = 'Admin';
     return parsed;
   }).filter(Boolean);
 }
@@ -1642,10 +1643,10 @@ export async function updateDocumentRequest(reqId, updates, approverEmpId) {
   return getDocumentRequestById(reqId);
 }
 
-export async function deleteDocumentRequest(reqId) {
+export async function deleteDocumentRequest(reqId, isAdmin = false) {
   const sb = supabase();
   await sb.from('document_requests')
-    .update({ deleted_at: new Date().toISOString() }).eq('id', reqId);
+    .update({ deleted_at: new Date().toISOString(), deleted_by_admin: isAdmin }).eq('id', reqId);
 }
 
 // ─── Aggregator: combine leave + attendance_exception + document ─────────────
@@ -1658,4 +1659,71 @@ export async function getRequests(opts, userId, empId, role) {
   ]);
   return [...leaves, ...aers, ...docs].sort((a, b) =>
     String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+// ─── Deleted requests history (admin only) ───────────────────────────────────
+
+async function getDeletedLeaveRequests() {
+  const sb = supabase();
+  const { data: rows, error } = await sb.from('leave_requests')
+    .select('id, request_code, employee_id, leave_type_id, reason, total_days, status, submitted_at, created_at, deleted_at, leave_types(code), leave_request_periods(leave_date, days)')
+    .not('deleted_at', 'is', null)
+    .eq('deleted_by_admin', true)
+    .order('deleted_at', { ascending: false });
+  if (error) throw error;
+  const uniqueEmpIds = [...new Set((rows || []).map(r => r.employee_id))];
+  const empMap = await buildEmpMap(sb, uniqueEmpIds);
+  return (rows || []).map(r => {
+    const parsed = parseLeaveRequest(r, empMap);
+    if (!parsed) return null;
+    parsed.deletedAt = r.deleted_at;
+    return parsed;
+  }).filter(Boolean);
+}
+
+async function getDeletedAttendanceExceptionRequests() {
+  const sb = supabase();
+  const { data: rows, error } = await sb.from('attendance_exception_requests')
+    .select('*, attendance_exception_types(code, label_th, label_en)')
+    .not('deleted_at', 'is', null)
+    .eq('deleted_by_admin', true)
+    .order('deleted_at', { ascending: false });
+  if (error) throw error;
+  const empIds = [...new Set((rows || []).map(r => r.employee_id))];
+  const empMap = await buildEmpMap(sb, empIds);
+  return (rows || []).map(r => {
+    const parsed = parseAttendanceExceptionRequest(r, empMap);
+    if (!parsed) return null;
+    parsed.deletedAt = r.deleted_at;
+    return parsed;
+  }).filter(Boolean);
+}
+
+async function getDeletedDocumentRequests() {
+  const sb = supabase();
+  const { data: rows, error } = await sb.from('document_requests')
+    .select('*, document_request_types(code, name_th)')
+    .not('deleted_at', 'is', null)
+    .eq('deleted_by_admin', true)
+    .order('deleted_at', { ascending: false });
+  if (error) throw error;
+  const empIds = [...new Set((rows || []).map(r => r.employee_id))];
+  const empMap = await buildEmpMap(sb, empIds);
+  return (rows || []).map(r => {
+    const parsed = parseDocumentRequest(r, empMap);
+    if (!parsed) return null;
+    parsed.deletedAt = r.deleted_at;
+    parsed.approver = 'Admin';
+    return parsed;
+  }).filter(Boolean);
+}
+
+export async function getDeletedRequests() {
+  const [leaves, aers, docs] = await Promise.all([
+    getDeletedLeaveRequests(),
+    getDeletedAttendanceExceptionRequests(),
+    getDeletedDocumentRequests(),
+  ]);
+  return [...leaves, ...aers, ...docs].sort((a, b) =>
+    String(b.deletedAt || '').localeCompare(String(a.deletedAt || '')));
 }
