@@ -359,6 +359,23 @@ export async function getEmploymentTypes() {
   return (data || []).map(r => r.name_th);
 }
 
+export async function getDocumentRequestTypes() {
+  const sb = supabase();
+  const { data } = await sb.from('document_request_types')
+    .select('id, code, name_th, handled_by, default_processing_days')
+    .is('deleted_at', null)
+    .order('id');
+  return data || [];
+}
+
+export async function getAttendanceExceptionTypes() {
+  const sb = supabase();
+  const { data } = await sb.from('attendance_exception_types')
+    .select('id, code, label_th, label_en')
+    .order('id');
+  return data || [];
+}
+
 export async function getAllAdmins() {
   const sb = supabase();
   const lookups = await getLookups();
@@ -442,7 +459,7 @@ export async function createUser(body) {
 
   const userId = (body.employeeId || `u_${Date.now()}`).toLowerCase();
   const empId  = body.employeeId || userId;
-  const email  = (body.email || `${empId}@apphr.test`).toLowerCase();
+  const email  = (body.email || `${empId}@hand.co.th`).toLowerCase();
 
   // Split Thai/English names
   const nameTh    = body.nameTh || '';
@@ -836,7 +853,32 @@ async function buildEmpMap(sb, empIds) {
   ]));
 }
 
-export async function getRequests({ scope, all } = {}, userId, empId, role) {
+// Resolve approver display names per employee id, sourced from approver_mappings.
+// Returns { [employeeId]: ['name1', 'name2'] } — same approver chain used by leave requests.
+async function buildApproverNameMap(sb, empIds) {
+  if (!empIds.length) return {};
+  const { data: mappings } = await sb.from('approver_mappings')
+    .select('employee_id, approver_employee_id')
+    .in('employee_id', empIds);
+  const approverEmpIds = [...new Set((mappings || []).map(m => m.approver_employee_id))];
+  if (!approverEmpIds.length) return {};
+  const { data: aEmps } = await sb.from('employees')
+    .select('id, first_name_th, last_name_th')
+    .in('id', approverEmpIds);
+  const nameById = Object.fromEntries(
+    (aEmps || []).map(e => [e.id, [e.first_name_th, e.last_name_th].filter(Boolean).join(' ')])
+  );
+  const result = {};
+  for (const m of (mappings || [])) {
+    const name = nameById[m.approver_employee_id];
+    if (!name) continue;
+    if (!result[m.employee_id]) result[m.employee_id] = [];
+    result[m.employee_id].push(name);
+  }
+  return result;
+}
+
+export async function getLeaveRequests({ scope, all } = {}, userId, empId, role) {
   const sb = supabase();
   let query = sb.from('leave_requests')
     .select('id, request_code, employee_id, leave_type_id, reason, total_days, status, submitted_at, created_at, leave_types(code), leave_request_periods(leave_date, days)');
@@ -1318,4 +1360,302 @@ export async function snapshotAnnualCarry(yearPrefix) {
     });
   }
   return summary;
+}
+
+// ─── Attendance Exception (Work Outside) requests ────────────────────────────
+
+function parseAttendanceExceptionRequest(r, empMap = {}) {
+  if (!r) return null;
+  const emp = empMap[r.employee_id] || {};
+  const typeRow = r.attendance_exception_types || {};
+  return {
+    id:           r.id,
+    ownerKey:     r.employee_id,
+    ownerId:      emp.user_id || r.employee_id,
+    ownerName:    emp.name    || '',
+    employeeId:   r.employee_id,
+    userId:       emp.user_id || r.employee_id,
+    userName:     emp.name    || '',
+    type:         'Work Outside',
+    subTypeCode:  typeRow.code     || '',
+    subType:      typeRow.label_th || '',
+    detail:       [typeRow.label_th, r.location, r.reason].filter(Boolean).join(' · '),
+    status:       r.status,
+    date:         r.start_date || '',
+    dateKey:      r.start_date || '',
+    startDateKey: r.start_date || '',
+    endDateKey:   r.end_date   || r.start_date || '',
+    startTime:    r.start_time || '',
+    endTime:      r.end_time   || '',
+    totalHours:   r.total_hours,
+    location:     r.location   || '',
+    reason:       r.reason     || '',
+    days:         0,
+    approver:     '',
+    createdAt:    r.created_at,
+    requestCode:  r.request_code,
+    _kind:        'attendance_exception',
+  };
+}
+
+export async function getAttendanceExceptionRequestRaw(reqId) {
+  const sb = supabase();
+  const { data } = await sb.from('attendance_exception_requests')
+    .select('id, employee_id, status').eq('id', reqId).is('deleted_at', null).maybeSingle();
+  return data;
+}
+
+export async function getAttendanceExceptionRequestById(reqId) {
+  const sb = supabase();
+  const { data: r } = await sb.from('attendance_exception_requests')
+    .select('*, attendance_exception_types(code, label_th, label_en)')
+    .eq('id', reqId).is('deleted_at', null).maybeSingle();
+  if (!r) return null;
+  const [empMap, approverNameMap] = await Promise.all([
+    buildEmpMap(sb, [r.employee_id]),
+    buildApproverNameMap(sb, [r.employee_id]),
+  ]);
+  const parsed = parseAttendanceExceptionRequest(r, empMap);
+  if (parsed) {
+    const names = approverNameMap[r.employee_id];
+    parsed.approver = names?.length ? names.join(' / ') : 'แอดมิน';
+  }
+  return parsed;
+}
+
+export async function getAttendanceExceptionRequests({ scope, all } = {}, userId, empId, role) {
+  const sb = supabase();
+  let query = sb.from('attendance_exception_requests')
+    .select('*, attendance_exception_types(code, label_th, label_en)')
+    .is('deleted_at', null);
+
+  if (role !== 'admin' && all !== '1') {
+    if (scope === 'approver') {
+      const { data: maps } = await sb.from('approver_mappings').select('employee_id').eq('approver_employee_id', empId);
+      const ownEmpIds = [...new Set([empId, ...(maps || []).map(m => m.employee_id)])];
+      query = query.in('employee_id', ownEmpIds);
+    } else {
+      query = query.eq('employee_id', empId);
+    }
+  }
+
+  const { data: rows, error } = await query.order('created_at', { ascending: false });
+  if (error) throw error;
+
+  const empIds = [...new Set((rows || []).map(r => r.employee_id))];
+  const [empMap, approverNameMap] = await Promise.all([
+    buildEmpMap(sb, empIds),
+    buildApproverNameMap(sb, empIds),
+  ]);
+  return (rows || []).map(r => {
+    const parsed = parseAttendanceExceptionRequest(r, empMap);
+    if (!parsed) return null;
+    const names = approverNameMap[r.employee_id];
+    parsed.approver = names?.length ? names.join(' / ') : 'แอดมิน';
+    return parsed;
+  }).filter(Boolean);
+}
+
+export async function createAttendanceExceptionRequest(body, empId) {
+  const sb = supabase();
+  const code = body.exceptionTypeCode || body.subTypeCode;
+  if (!code) throw new Error('exceptionTypeCode required');
+  const { data: type } = await sb.from('attendance_exception_types')
+    .select('id').eq('code', code).maybeSingle();
+  if (!type) throw new Error(`unknown exception type: ${code}`);
+
+  const reqCode = body.id || `WO-${String(Date.now()).slice(-6)}`;
+  const { data: req, error } = await sb.from('attendance_exception_requests').insert({
+    request_code:                 reqCode,
+    employee_id:                  empId,
+    attendance_exception_type_id: type.id,
+    start_date:                   body.startDateKey,
+    end_date:                     body.endDateKey || body.startDateKey,
+    start_time:                   body.startTime  || null,
+    end_time:                     body.endTime    || null,
+    total_hours:                  body.totalHours ?? null,
+    location:                     body.location   || null,
+    reason:                       body.reason     || body.detail || null,
+    status:                       body.status     || 'pending',
+  }).select().single();
+  if (error) throw new Error(error.message);
+  return getAttendanceExceptionRequestById(req.id);
+}
+
+export async function updateAttendanceExceptionRequest(reqId, updates, approverEmpId) {
+  const sb = supabase();
+  const upd = {};
+  if (updates.status) {
+    upd.status = updates.status;
+    if (updates.status === 'approved') {
+      upd.approved_by_employee_id = approverEmpId;
+      upd.approved_at = new Date().toISOString();
+      await sb.from('approvals').insert({ request_type: 'attendance_exception', request_id: reqId, approver_employee_id: approverEmpId, action: 'approved' });
+    } else if (updates.status === 'rejected') {
+      await sb.from('approvals').insert({ request_type: 'attendance_exception', request_id: reqId, approver_employee_id: approverEmpId, action: 'rejected' });
+    }
+  }
+  if (Object.keys(upd).length) {
+    await sb.from('attendance_exception_requests')
+      .update({ ...upd, updated_at: new Date().toISOString() }).eq('id', reqId);
+  }
+  return getAttendanceExceptionRequestById(reqId);
+}
+
+export async function deleteAttendanceExceptionRequest(reqId) {
+  const sb = supabase();
+  await sb.from('attendance_exception_requests')
+    .update({ deleted_at: new Date().toISOString() }).eq('id', reqId);
+}
+
+// ─── Document requests ───────────────────────────────────────────────────────
+
+function parseDocumentRequest(r, empMap = {}) {
+  if (!r) return null;
+  const emp = empMap[r.employee_id] || {};
+  const typeRow = r.document_request_types || {};
+  return {
+    id:           r.id,
+    ownerKey:     r.employee_id,
+    ownerId:      emp.user_id || r.employee_id,
+    ownerName:    emp.name    || '',
+    employeeId:   r.employee_id,
+    userId:       emp.user_id || r.employee_id,
+    userName:     emp.name    || '',
+    type:         'Request Documents',
+    subTypeCode:  typeRow.code    || '',
+    subType:      typeRow.name_th || '',
+    detail:       [typeRow.name_th, r.purpose].filter(Boolean).join(' · '),
+    purpose:      r.purpose || '',
+    status:       r.status,
+    date:         toDateKey(r.created_at) || '',
+    dateKey:      toDateKey(r.created_at) || '',
+    startDateKey: '',
+    endDateKey:   '',
+    dueDate:      r.due_date || '',
+    readyAt:      r.ready_at || '',
+    collectedAt:  r.collected_at || '',
+    days:         0,
+    approver:     '',
+    createdAt:    r.created_at,
+    requestCode:  r.request_code,
+    _kind:        'document',
+  };
+}
+
+export async function getDocumentRequestRaw(reqId) {
+  const sb = supabase();
+  const { data } = await sb.from('document_requests')
+    .select('id, employee_id, status').eq('id', reqId).is('deleted_at', null).maybeSingle();
+  return data;
+}
+
+export async function getDocumentRequestById(reqId) {
+  const sb = supabase();
+  const { data: r } = await sb.from('document_requests')
+    .select('*, document_request_types(code, name_th)')
+    .eq('id', reqId).is('deleted_at', null).maybeSingle();
+  if (!r) return null;
+  const [empMap, approverNameMap] = await Promise.all([
+    buildEmpMap(sb, [r.employee_id]),
+    buildApproverNameMap(sb, [r.employee_id]),
+  ]);
+  const parsed = parseDocumentRequest(r, empMap);
+  if (parsed) {
+    const names = approverNameMap[r.employee_id];
+    parsed.approver = names?.length ? names.join(' / ') : 'แอดมิน';
+  }
+  return parsed;
+}
+
+export async function getDocumentRequests({ scope, all } = {}, userId, empId, role) {
+  const sb = supabase();
+  let query = sb.from('document_requests')
+    .select('*, document_request_types(code, name_th)')
+    .is('deleted_at', null);
+
+  // Document requests are owned by their submitter and reviewed only by admins.
+  // Even if a Board/Director is the leave-approver of someone, they should NOT
+  // see other people's document requests — restrict scope=approver to own only.
+  if (role !== 'admin' && all !== '1') {
+    query = query.eq('employee_id', empId);
+  }
+
+  const { data: rows, error } = await query.order('created_at', { ascending: false });
+  if (error) throw error;
+
+  const empIds = [...new Set((rows || []).map(r => r.employee_id))];
+  const [empMap, approverNameMap] = await Promise.all([
+    buildEmpMap(sb, empIds),
+    buildApproverNameMap(sb, empIds),
+  ]);
+  return (rows || []).map(r => {
+    const parsed = parseDocumentRequest(r, empMap);
+    if (!parsed) return null;
+    const names = approverNameMap[r.employee_id];
+    parsed.approver = names?.length ? names.join(' / ') : 'แอดมิน';
+    return parsed;
+  }).filter(Boolean);
+}
+
+export async function createDocumentRequest(body, empId) {
+  const sb = supabase();
+  const code = body.documentTypeCode || body.subTypeCode;
+  if (!code) throw new Error('documentTypeCode required');
+  const { data: type } = await sb.from('document_request_types')
+    .select('id').eq('code', code).is('deleted_at', null).maybeSingle();
+  if (!type) throw new Error(`unknown document type: ${code}`);
+
+  const reqCode = body.id || `DOC-${String(Date.now()).slice(-6)}`;
+  const purpose = body.purpose
+    ?? [body.language, body.note].filter(Boolean).join(' · ')
+    ?? null;
+
+  const { data: req, error } = await sb.from('document_requests').insert({
+    request_code:             reqCode,
+    employee_id:              empId,
+    document_request_type_id: type.id,
+    purpose:                  purpose || null,
+    status:                   body.status || 'pending',
+  }).select().single();
+  if (error) throw new Error(error.message);
+  return getDocumentRequestById(req.id);
+}
+
+export async function updateDocumentRequest(reqId, updates, approverEmpId) {
+  const sb = supabase();
+  const upd = {};
+  if (updates.status) {
+    upd.status = updates.status;
+    if (updates.status === 'approved') {
+      upd.processed_by_employee_id = approverEmpId;
+      upd.ready_at = new Date().toISOString();
+      await sb.from('approvals').insert({ request_type: 'document', request_id: reqId, approver_employee_id: approverEmpId, action: 'approved' });
+    } else if (updates.status === 'rejected') {
+      await sb.from('approvals').insert({ request_type: 'document', request_id: reqId, approver_employee_id: approverEmpId, action: 'rejected' });
+    }
+  }
+  if (Object.keys(upd).length) {
+    await sb.from('document_requests')
+      .update({ ...upd, updated_at: new Date().toISOString() }).eq('id', reqId);
+  }
+  return getDocumentRequestById(reqId);
+}
+
+export async function deleteDocumentRequest(reqId) {
+  const sb = supabase();
+  await sb.from('document_requests')
+    .update({ deleted_at: new Date().toISOString() }).eq('id', reqId);
+}
+
+// ─── Aggregator: combine leave + attendance_exception + document ─────────────
+
+export async function getRequests(opts, userId, empId, role) {
+  const [leaves, aers, docs] = await Promise.all([
+    getLeaveRequests(opts, userId, empId, role),
+    getAttendanceExceptionRequests(opts, userId, empId, role),
+    getDocumentRequests(opts, userId, empId, role),
+  ]);
+  return [...leaves, ...aers, ...docs].sort((a, b) =>
+    String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }

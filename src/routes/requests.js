@@ -19,6 +19,14 @@ import {
   usedDaysThisYear,
   getUserByEmployeeId,
   fetchUserData,
+  getAttendanceExceptionRequestRaw,
+  createAttendanceExceptionRequest,
+  updateAttendanceExceptionRequest,
+  deleteAttendanceExceptionRequest,
+  getDocumentRequestRaw,
+  createDocumentRequest,
+  updateDocumentRequest,
+  deleteDocumentRequest,
 } from '../supabase/queries.js';
 
 const router = Router();
@@ -125,7 +133,17 @@ router.post('/', requireAuth, async (req, res) => {
       start_date: ownerData.employment?.start_date || null,
     };
 
-    // Employee-only: validate leave-specific rules
+    // Dispatch by request type
+    if (b.type === 'Work Outside') {
+      const result = await createAttendanceExceptionRequest(b, owner.empId);
+      return res.status(201).json(result);
+    }
+    if (b.type === 'Request Documents') {
+      const result = await createDocumentRequest(b, owner.empId);
+      return res.status(201).json(result);
+    }
+
+    // Leave: validate leave-specific rules (employee only)
     if (req.user.role !== 'admin') {
       const leaveCfg = findLeaveType(b.type);
       if (leaveCfg) {
@@ -154,20 +172,51 @@ router.post('/', requireAuth, async (req, res) => {
   }
 });
 
+// Locate a request across the 3 tables; return { raw, kind, updater, deleter }
+async function locateRequest(reqId) {
+  const leave = await getRequestRaw(reqId);
+  if (leave) return { raw: leave, kind: 'leave', updater: updateRequest, deleter: deleteRequest };
+  const aer = await getAttendanceExceptionRequestRaw(reqId);
+  if (aer) return { raw: aer, kind: 'attendance_exception', updater: updateAttendanceExceptionRequest, deleter: deleteAttendanceExceptionRequest };
+  const doc = await getDocumentRequestRaw(reqId);
+  if (doc) return { raw: doc, kind: 'document', updater: updateDocumentRequest, deleter: deleteDocumentRequest };
+  return null;
+}
+
 router.patch('/:id', requireAuth, async (req, res) => {
   try {
-    const raw = await getRequestRaw(req.params.id);
-    if (!raw) return res.status(404).json({ error: 'not found' });
+    const found = await locateRequest(req.params.id);
+    if (!found) return res.status(404).json({ error: 'not found' });
+    const { raw, kind, updater } = found;
 
-    const myEmpId  = empIdOf(req);
-    const isOwner  = raw.employee_id === myEmpId;
+    const myEmpId = empIdOf(req);
+    const isOwner = raw.employee_id === myEmpId;
 
-    // Check per-user approver assignment
+    // Document requests are admin-only to approve/reject (Board/Director cannot review them).
+    // Owners may still PATCH their own pending document (e.g. for future cancel-by-status flow),
+    // but cannot self-approve.
+    if (kind === 'document') {
+      if (req.user.role !== 'admin' && !isOwner) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+      const status = req.body?.status;
+      if (status && !['pending', 'approved', 'rejected'].includes(status)) {
+        return res.status(400).json({ error: 'bad status' });
+      }
+      if (status && (status === 'approved' || status === 'rejected') && req.user.role !== 'admin') {
+        return res.status(403).json({ error: 'document requests can only be approved by admin' });
+      }
+      const updates = {};
+      if (status) updates.status = status;
+      const result = await updater(req.params.id, updates, myEmpId);
+      return res.json(result);
+    }
+
     const approverUserIds   = await getOwnerApproverUserIds(raw.employee_id);
     const hasPerUserApprovers = approverUserIds.length > 0;
     const isAssignedApprover  = hasPerUserApprovers
       ? approverUserIds.includes(req.user.sub)
-      : false; // no level-based fallback — admin handles unassigned
+      : false;
 
     if (req.user.role !== 'admin' && !isOwner && !isAssignedApprover) {
       return res.status(403).json({ error: 'forbidden' });
@@ -184,8 +233,8 @@ router.patch('/:id', requireAuth, async (req, res) => {
     const updates = {};
     if (status) updates.status = status;
 
-    // Admin-only full edit
-    if (req.user.role === 'admin') {
+    // Admin-only full edit (leave only — other kinds use status-only path)
+    if (req.user.role === 'admin' && kind === 'leave') {
       const b = req.body || {};
       if (b.type       !== undefined) updates.type       = b.type;
       if (b.detail     !== undefined) updates.detail     = b.detail;
@@ -199,7 +248,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
       }
     }
 
-    const result = await updateRequest(req.params.id, updates, myEmpId);
+    const result = await updater(req.params.id, updates, myEmpId);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -208,12 +257,12 @@ router.patch('/:id', requireAuth, async (req, res) => {
 
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
-    const raw = await getRequestRaw(req.params.id);
-    if (!raw) return res.status(404).json({ error: 'not found' });
-    if (req.user.role !== 'admin' && raw.employee_id !== empIdOf(req)) {
+    const found = await locateRequest(req.params.id);
+    if (!found) return res.status(404).json({ error: 'not found' });
+    if (req.user.role !== 'admin' && found.raw.employee_id !== empIdOf(req)) {
       return res.status(403).json({ error: 'forbidden' });
     }
-    await deleteRequest(req.params.id);
+    await found.deleter(req.params.id);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

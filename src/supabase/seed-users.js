@@ -66,7 +66,7 @@ async function upsertEmployee(empId, userId, data, lookups) {
   const nameParts = (data.nameTh || '').replace(/^ดร\.\s*/, '').trim().split(/\s+/);
   const firstTh = nameParts[0] || '';
   const lastTh  = nameParts.slice(1).join(' ');
-  const email   = `${userId}@apphr.test`;
+  const email   = data.email || `${userId}@hand.co.th`;
 
   // employees row
   const { error: eErr } = await supabase.from('employees').upsert(
@@ -127,22 +127,23 @@ async function upsertEmployee(empId, userId, data, lookups) {
   }
 }
 
+// Emails match what's actually in Supabase (transliterated first name @ hand.co.th).
 const EMPLOYEES = [
-  { nameTh: 'ดร.ต่อภัสสร์ ยมนาค',   employeeId: 'H0001', position: 'Co-Founder and Chief Advisor',                   department: 'Board of Directors',                                      employeeLevel: 'Board Level' },
-  { nameTh: 'สุภอรรถ โบสุวรรณ',       employeeId: 'H0002', position: 'Managing Director',                               department: 'Board of Directors',                                      employeeLevel: 'Board Level' },
-  { nameTh: 'พลังรัฐ รัชตะนาวิน',    employeeId: 'H0003', position: 'Director of Operations',                          department: 'Board of Directors',                                      employeeLevel: 'Board Level' },
-  { nameTh: 'ยุทธนา วังวสุ',          employeeId: 'H0004', position: 'Co-Founder and Director',                         department: 'Board of Directors',                                      employeeLevel: 'Board Level' },
-  { nameTh: 'สุภัจจา อังค์สุวรรณ',   employeeId: 'H0006', position: 'Director of Research & Knowledge Management',    department: 'Good Governance Research and Learning Department',        employeeLevel: 'Director Level', employeeType: 'สัญญาจ้างประจำ', startDate: '18/12/2017', bankAccount: '0351293993' },
-  { nameTh: 'พัชรี ตรีพรม',           employeeId: 'H0007', position: 'Project Manager',                                 department: 'Collaboration and Coordination Department',               employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '18/12/2017', bankAccount: '0351575697' },
-  { nameTh: 'จรัสศรี พะลายะสุต',     employeeId: 'H0008', position: 'Director of Accounting and Finance',              department: 'Accounting and Finance Department',                       employeeLevel: 'Director Level', employeeType: 'การจ้างที่ปรึกษา', startDate: '07/04/2019', bankAccount: '7722080984', bankBranch: 'Central World' },
-  { nameTh: 'รักษ์ป่า อู่สุวรรณ',    employeeId: 'H0015', position: 'Project Manager',                                 department: 'Open Data for Transparency & Participation Department', employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '03/07/2022', probationStart: '03/07/2022', probationEnd: '06/07/2022', bankAccount: '0138434362', bankBranch: 'บ้านดู่' },
-  { nameTh: 'ศรันย์ชนก ลิมวิสิฐธนกร', employeeId: 'H0025', position: 'Executive Assistant',                            department: 'Collaboration and Coordination Department',               employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '04/03/2023', probationStart: '04/03/2023', bankAccount: '0238067782', bankBranch: 'บางกระบือ' },
-  { nameTh: 'ธรีญา อึ้งตระกูล',      employeeId: 'H0029', position: 'Project coordinator',                             department: 'Open Data for Transparency & Participation Department', employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '08/07/2023', probationStart: '08/07/2023', bankAccount: '0533261361', bankBranch: 'ฟิวเจอร์ พาร์ค รังสิต' },
-  { nameTh: 'จตุพร ศิรเลิศมุกุล',    employeeId: 'H0031', position: 'Accountant',                                       department: 'Accounting and Finance Department',                       employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '25/03/2024', probationStart: '25/03/2024', bankAccount: '1803680430', bankBranch: 'ฟิวเจอร์ พาร์ค รังสิต' },
-  { nameTh: 'ธนากาญจน์ กันทอง',      employeeId: 'H0032', position: 'Research Assistant',                              department: 'Good Governance Research and Learning Department',        employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '27/05/2024', probationStart: '27/05/2024', bankAccount: '0408689627', bankBranch: 'บิ๊กซี อ่อนนุช' },
-  { nameTh: 'ศุภชัย เสถียรหมั่น',    employeeId: 'H0033', position: 'Researcher',                                      department: 'Good Governance Research and Learning Department',        employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '06/10/2024', probationStart: '06/10/2024', bankAccount: '1861796600', bankBranch: 'จามจุรี สแควร์' },
-  { nameTh: 'ศุภวิชญ์ แก้วคูนอก',    employeeId: 'H0034', position: 'Center Manager of KRAC',                          department: 'Good Governance Research and Learning Department',        employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '09/09/2024', probationStart: '09/09/2024', probationEnd: '12/10/2024', bankAccount: '1928266644', bankBranch: 'ตลาดเกาะโพธิ์' },
-  { nameTh: 'ศศธร เอี่ยมสะอาด',      employeeId: 'H0042', position: 'Content Writer',                                  department: 'Open Data for Transparency & Participation Department', employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '06/05/2025', probationStart: '06/05/2025', bankAccount: '0252721827', bankBranch: 'สาขาเซ็นทรัลพลาซ่า เชียงใหม่' },
+  { email: 'torplus@hand.co.th',     nameTh: 'ดร.ต่อภัสสร์ ยมนาค',   employeeId: 'H0001', position: 'Co-Founder and Chief Advisor',                   department: 'Board of Directors',                                      employeeLevel: 'Board Level' },
+  { email: 'suppaut@hand.co.th',     nameTh: 'สุภอรรถ โบสุวรรณ',       employeeId: 'H0002', position: 'Managing Director',                               department: 'Board of Directors',                                      employeeLevel: 'Board Level' },
+  { email: 'bhalangrata@hand.co.th', nameTh: 'พลังรัฐ รัชตะนาวิน',    employeeId: 'H0003', position: 'Director of Operations',                          department: 'Board of Directors',                                      employeeLevel: 'Board Level' },
+  { email: 'yuthana@hand.co.th',     nameTh: 'ยุทธนา วังวสุ',          employeeId: 'H0004', position: 'Co-Founder and Director',                         department: 'Board of Directors',                                      employeeLevel: 'Board Level' },
+  { email: 'supatja@hand.co.th',     nameTh: 'สุภัจจา อังค์สุวรรณ',   employeeId: 'H0006', position: 'Director of Research & Knowledge Management',    department: 'Good Governance Research and Learning Department',        employeeLevel: 'Director Level', employeeType: 'สัญญาจ้างประจำ', startDate: '18/12/2017', bankAccount: '0351293993' },
+  { email: 'patcharee@hand.co.th',   nameTh: 'พัชรี ตรีพรม',           employeeId: 'H0007', position: 'Project Manager',                                 department: 'Collaboration and Coordination Department',               employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '18/12/2017', bankAccount: '0351575697' },
+  { email: 'charassri@hand.co.th',   nameTh: 'จรัสศรี พะลายะสุต',     employeeId: 'H0008', position: 'Director of Accounting and Finance',              department: 'Accounting and Finance Department',                       employeeLevel: 'Director Level', employeeType: 'การจ้างที่ปรึกษา', startDate: '07/04/2019', bankAccount: '7722080984', bankBranch: 'Central World' },
+  { email: 'rakpa@hand.co.th',       nameTh: 'รักษ์ป่า อู่สุวรรณ',    employeeId: 'H0015', position: 'Project Manager',                                 department: 'Open Data for Transparency & Participation Department', employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '03/07/2022', probationStart: '03/07/2022', probationEnd: '06/07/2022', bankAccount: '0138434362', bankBranch: 'บ้านดู่' },
+  { email: 'saranchanok@hand.co.th', nameTh: 'ศรันย์ชนก ลิมวิสิฐธนกร', employeeId: 'H0025', position: 'Executive Assistant',                            department: 'Collaboration and Coordination Department',               employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '04/03/2023', probationStart: '04/03/2023', bankAccount: '0238067782', bankBranch: 'บางกระบือ' },
+  { email: 'thareeya@hand.co.th',    nameTh: 'ธรีญา อึ้งตระกูล',      employeeId: 'H0029', position: 'Project coordinator',                             department: 'Open Data for Transparency & Participation Department', employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '08/07/2023', probationStart: '08/07/2023', bankAccount: '0533261361', bankBranch: 'ฟิวเจอร์ พาร์ค รังสิต' },
+  { email: 'jatupron@hand.co.th',    nameTh: 'จตุพร ศิรเลิศมุกุล',    employeeId: 'H0031', position: 'Accountant',                                       department: 'Accounting and Finance Department',                       employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '25/03/2024', probationStart: '25/03/2024', bankAccount: '1803680430', bankBranch: 'ฟิวเจอร์ พาร์ค รังสิต' },
+  { email: 'thanakan@hand.co.th',    nameTh: 'ธนากาญจน์ กันทอง',      employeeId: 'H0032', position: 'Research Assistant',                              department: 'Good Governance Research and Learning Department',        employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '27/05/2024', probationStart: '27/05/2024', bankAccount: '0408689627', bankBranch: 'บิ๊กซี อ่อนนุช' },
+  { email: 'suphachai@hand.co.th',   nameTh: 'ศุภชัย เสถียรหมั่น',    employeeId: 'H0033', position: 'Researcher',                                      department: 'Good Governance Research and Learning Department',        employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '06/10/2024', probationStart: '06/10/2024', bankAccount: '1861796600', bankBranch: 'จามจุรี สแควร์' },
+  { email: 'suppawit@hand.co.th',    nameTh: 'ศุภวิชญ์ แก้วคูนอก',    employeeId: 'H0034', position: 'Center Manager of KRAC',                          department: 'Good Governance Research and Learning Department',        employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '09/09/2024', probationStart: '09/09/2024', probationEnd: '12/10/2024', bankAccount: '1928266644', bankBranch: 'ตลาดเกาะโพธิ์' },
+  { email: 'sasathorn@hand.co.th',   nameTh: 'ศศธร เอี่ยมสะอาด',      employeeId: 'H0042', position: 'Content Writer',                                  department: 'Open Data for Transparency & Participation Department', employeeLevel: 'Project Level',  employeeType: 'สัญญาจ้างประจำ', startDate: '06/05/2025', probationStart: '06/05/2025', bankAccount: '0252721827', bankBranch: 'สาขาเซ็นทรัลพลาซ่า เชียงใหม่' },
 ];
 
 async function ensurePositions(lookups) {
@@ -189,11 +190,13 @@ async function main() {
   }
 
   // ─── Admin user ────────────────────────────────────────────────────────
-  console.log('\n• Admin user (admin@apphr.test)');
+  const adminEmail = 'admin@hand.co.th';
+  console.log(`\n• Admin user (${adminEmail})`);
   const adminHash = bcrypt.hashSync('Admin@123', 10);
-  await upsertUser('admin', 'admin@apphr.test', adminHash, lookups, true);
+  await upsertUser('admin', adminEmail, adminHash, lookups, true);
   // Admin needs an employees row so getUserByEmail can find them
   await upsertEmployee('admin', 'admin', {
+    email: adminEmail,
     nameTh: 'แอดมิน ระบบ', nameEn: 'System', nameEnLast: 'Admin',
     position: 'System Administrator',
     department: Object.keys(lookups.departmentIds)[0] || '',
@@ -206,14 +209,14 @@ async function main() {
   for (const e of EMPLOYEES) {
     const userId = e.employeeId.toLowerCase();
     const hash   = bcrypt.hashSync(`${e.employeeId}@123`, 10);
-    await upsertUser(userId, `${userId}@apphr.test`, hash, lookups, false);
+    await upsertUser(userId, e.email, hash, lookups, false);
     await upsertEmployee(e.employeeId, userId, e, lookups);
-    console.log(`  ✓ ${e.employeeId}  ${e.nameTh}`);
+    console.log(`  ✓ ${e.employeeId}  ${e.email}  ${e.nameTh}`);
   }
 
   console.log('\n✅ Done. Users in system:');
-  console.log('   Admin : admin@apphr.test  / Admin@123');
-  console.log('   Employees: h0001@apphr.test / H0001@123  (etc.)');
+  console.log('   Admin : admin@hand.co.th  / Admin@123');
+  console.log('   Employees: torplus@hand.co.th / H0001@123  (etc., see EMPLOYEES list)');
 }
 
 main().catch(err => { console.error('❌', err.message); process.exit(1); });

@@ -1,12 +1,32 @@
 import { Router } from 'express';
 import { requireAuth } from '../auth.js';
-import { getEmploymentTypes } from '../supabase/queries.js';
+import {
+  getEmploymentTypes,
+  getDocumentRequestTypes,
+  getAttendanceExceptionTypes,
+} from '../supabase/queries.js';
 
 const router = Router();
 
 router.get('/employment-types', requireAuth, async (req, res) => {
   try {
     res.json(await getEmploymentTypes());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/document-request-types', requireAuth, async (req, res) => {
+  try {
+    res.json(await getDocumentRequestTypes());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/attendance-exception-types', requireAuth, async (req, res) => {
+  try {
+    res.json(await getAttendanceExceptionTypes());
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
