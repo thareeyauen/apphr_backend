@@ -1773,3 +1773,32 @@ export async function getDeletedRequests() {
   return [...leaves, ...aers, ...docs].sort((a, b) =>
     String(b.deletedAt || '').localeCompare(String(a.deletedAt || '')));
 }
+
+// ─── Company holidays ────────────────────────────────────────────────────────
+
+export async function getHolidaysInRange(startDate, endDate, companyId = 1) {
+  const sb = supabase();
+  const { data, error } = await sb
+    .from('company_holidays')
+    .select('holiday_date')
+    .eq('company_id', companyId)
+    .is('deleted_at', null)
+    .gte('holiday_date', startDate)
+    .lte('holiday_date', endDate);
+  if (error) throw new Error(error.message);
+  return (data || []).map((r) => r.holiday_date);
+}
+
+export async function getHolidaysForYear(year, companyId = 1) {
+  const sb = supabase();
+  const { data, error } = await sb
+    .from('company_holidays')
+    .select('holiday_date, name, is_compensable')
+    .eq('company_id', companyId)
+    .is('deleted_at', null)
+    .gte('holiday_date', `${year}-01-01`)
+    .lte('holiday_date', `${year}-12-31`)
+    .order('holiday_date');
+  if (error) throw new Error(error.message);
+  return data || [];
+}

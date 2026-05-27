@@ -51,6 +51,7 @@ export const LEAVE_TYPES = [
     quota: 15,
     advanceDays: 30,
     backdateDays: 0,
+    countCalendarDays: true,
   },
   {
     id: 'unpaid',
@@ -59,6 +60,7 @@ export const LEAVE_TYPES = [
     quota: 30,
     advanceDays: 30,
     backdateDays: 0,
+    countCalendarDays: true,
   },
   {
     id: 'sterilization',
@@ -83,6 +85,7 @@ export const LEAVE_TYPES = [
     quota: 60,
     advanceDays: 30,
     backdateDays: 0,
+    countCalendarDays: true,
   },
   {
     id: 'maternity',
@@ -91,6 +94,7 @@ export const LEAVE_TYPES = [
     quota: 120,
     advanceDays: 30,
     backdateDays: 0,
+    countCalendarDays: true,
   },
   {
     id: 'paternity',
@@ -101,6 +105,7 @@ export const LEAVE_TYPES = [
     backdateDays: 0,
     requiresChildBirthDate: true,
     useWithinDaysFromChildBirth: 90,
+    countCalendarDays: true,
   },
 ];
 
@@ -154,6 +159,53 @@ export function annualQuotaForTenure(tenureYears) {
     (t) => tenureYears >= t.minYears && tenureYears < t.maxYears
   );
   return tier ? tier.days : 0;
+}
+
+// Format a Date as YYYY-MM-DD using LOCAL time (matches how parseFlexibleDate constructs dates).
+export function toDateKey(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+// Count calendar days inclusive of both endpoints (e.g. Mon→Fri = 5).
+export function countCalendarDaysInRange(startKey, endKey) {
+  const start = parseFlexibleDate(startKey);
+  const end   = parseFlexibleDate(endKey) || start;
+  if (!start || !end || end < start) return 0;
+  return daysBetween(start, end) + 1;
+}
+
+// Count working days (Mon–Fri, excluding company holidays) inclusive of both endpoints.
+// holidaySet: a Set of YYYY-MM-DD strings.
+export function countWorkingDaysInRange(startKey, endKey, holidaySet = new Set()) {
+  const start = parseFlexibleDate(startKey);
+  const end   = parseFlexibleDate(endKey) || start;
+  if (!start || !end || end < start) return 0;
+  let count = 0;
+  const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const stop   = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  while (cursor <= stop) {
+    const dow = cursor.getDay();
+    if (dow !== 0 && dow !== 6 && !holidaySet.has(toDateKey(cursor))) count += 1;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return count;
+}
+
+// Effective leave days based on the leave type's countCalendarDays flag.
+// Half-day modes ('half-morning'/'half-afternoon') multiply by 0.5 only when the
+// single selected day is actually a working day; otherwise the result stays at 0.
+export function computeEffectiveLeaveDays(leaveCfg, startKey, endKey, dayTypeId, holidaySet) {
+  if (leaveCfg.countCalendarDays) {
+    return countCalendarDaysInRange(startKey, endKey);
+  }
+  const working = countWorkingDaysInRange(startKey, endKey, holidaySet || new Set());
+  if (working === 1 && (dayTypeId === 'half-morning' || dayTypeId === 'half-afternoon')) {
+    return 0.5;
+  }
+  return working;
 }
 
 // Returns the effective quota for a leave type. For annual, computes from tenure.

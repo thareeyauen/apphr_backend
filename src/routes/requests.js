@@ -5,6 +5,7 @@ import {
   parseFlexibleDate,
   daysBetween,
   computeTenureYears,
+  computeEffectiveLeaveDays,
   LEAVE_TYPES,
 } from '../leaveTypes.js';
 import {
@@ -28,6 +29,7 @@ import {
   createDocumentRequest,
   updateDocumentRequest,
   deleteDocumentRequest,
+  getHolidaysInRange,
 } from '../supabase/queries.js';
 
 const router = Router();
@@ -53,8 +55,24 @@ async function validateLeaveRequest({ owner, leaveCfg, body }) {
   if (!start) return { error: 'invalid start date' };
   if (end < start) return { error: 'end date must be on or after start date' };
 
-  const days = Number(body.days);
-  if (!Number.isFinite(days) || days <= 0) return { error: 'days must be > 0' };
+  // Compute effective leave days as source of truth.
+  // For working-day types: skip weekends + company holidays in the date range.
+  // For calendar-day types (maternity/paternity/ordination/military/unpaid): count every day.
+  let holidaySet = new Set();
+  if (!leaveCfg.countCalendarDays) {
+    const holidays = await getHolidaysInRange(body.startDateKey, body.endDateKey);
+    holidaySet = new Set(holidays);
+  }
+  const effectiveDays = computeEffectiveLeaveDays(
+    leaveCfg, body.startDateKey, body.endDateKey, body.dayTypeId, holidaySet,
+  );
+
+  if (effectiveDays <= 0) {
+    return { error: `${leaveCfg.labelTh}: ช่วงวันที่เลือกตรงกับวันหยุดทั้งหมด — ไม่สามารถใช้สิทธิลาได้` };
+  }
+
+  // Override body.days so downstream storage uses the canonical value.
+  body.days = effectiveDays;
 
   const leadDays = daysBetween(today, start);
   if (leaveCfg.advanceDays > 0 && leadDays < leaveCfg.advanceDays) {
@@ -76,7 +94,7 @@ async function validateLeaveRequest({ owner, leaveCfg, body }) {
     }
   }
   if (leaveCfg.id === 'sick' && leaveCfg.certificateAfterDays) {
-    if (days >= leaveCfg.certificateAfterDays && !body.medicalCertificate) {
+    if (effectiveDays >= leaveCfg.certificateAfterDays && !body.medicalCertificate) {
       return { error: 'ลาป่วยติดต่อกัน 3 วันขึ้นไป ต้องแนบหนังสือรับรองแพทย์' };
     }
   }
@@ -97,7 +115,7 @@ async function validateLeaveRequest({ owner, leaveCfg, body }) {
   if (quota > 0) {
     const yearPrefix = String(new Date().getFullYear());
     const used = await usedDaysThisYear(owner.empId, leaveCfg.label, yearPrefix);
-    if (used + days > quota) {
+    if (used + effectiveDays > quota) {
       return { error: `${leaveCfg.labelTh}: เกินสิทธิ (คงเหลือ ${Math.max(quota - used, 0)} วัน)` };
     }
   }

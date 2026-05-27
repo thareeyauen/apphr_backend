@@ -21,6 +21,12 @@ router.get('/types', requireAuth, (_req, res) => {
     minTenureYears:     t.minTenureYears || 0,
     advanceDays:        t.advanceDays || 0,
     backdateDays:       t.backdateDays || 0,
+    countCalendarDays:  Boolean(t.countCalendarDays),
+    requiresHolidayWorkDate:      Boolean(t.requiresHolidayWorkDate),
+    requiresSupervisorPreApproval: Boolean(t.requiresSupervisorPreApproval),
+    requiresChildBirthDate:       Boolean(t.requiresChildBirthDate),
+    useWithinDaysFromChildBirth:  t.useWithinDaysFromChildBirth || 0,
+    certificateAfterDays:         t.certificateAfterDays || 0,
   })));
 });
 
