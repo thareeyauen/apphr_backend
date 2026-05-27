@@ -10,19 +10,27 @@ import settingsRoutes from './routes/settings.js';
 import lookupsRoutes from './routes/lookups.js';
 
 const app = express();
-app.use(cors());
+const allowedOrigins = process.env.CORS_ORIGIN?.split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+app.use(
+  cors({
+    origin: allowedOrigins?.length ? allowedOrigins : true,
+    credentials: true,
+  }),
+);
 app.use(express.json({ limit: '10mb' }));
 
 app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/admins', adminRoutes);
-app.use('/api/requests', requestRoutes);
-app.use('/api/entitlements', entitlementRoutes);
-app.use('/api/checkins', checkinRoutes);
-app.use('/api/settings', settingsRoutes);
-app.use('/api/lookups', lookupsRoutes);
+app.use('/auth', authRoutes);
+app.use('/users', userRoutes);
+app.use('/admins', adminRoutes);
+app.use('/requests', requestRoutes);
+app.use('/entitlements', entitlementRoutes);
+app.use('/checkins', checkinRoutes);
+app.use('/settings', settingsRoutes);
+app.use('/lookups', lookupsRoutes);
 
 app.use((err, _req, res, _next) => {
   console.error(err);
@@ -30,4 +38,6 @@ app.use((err, _req, res, _next) => {
 });
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`apphr-backend on http://localhost:${PORT}`));
+app.listen(PORT, () =>
+  console.log(`apphr-backend on http://localhost:${PORT}`),
+);
