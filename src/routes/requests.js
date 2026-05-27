@@ -194,10 +194,15 @@ async function locateRequest(reqId) {
 }
 
 router.patch('/:id', requireAuth, async (req, res) => {
+  console.log('[PATCH /requests/:id] id=', req.params.id, 'body=', JSON.stringify(req.body), 'user.role=', req.user.role, 'user.sub=', req.user.sub, 'user.empId=', req.user.empId);
   try {
     const found = await locateRequest(req.params.id);
-    if (!found) return res.status(404).json({ error: 'not found' });
+    if (!found) {
+      console.warn('[PATCH /requests/:id] not found id=', req.params.id);
+      return res.status(404).json({ error: 'not found' });
+    }
     const { raw, kind, updater } = found;
+    console.log('[PATCH /requests/:id] resolved kind=', kind, 'raw.employee_id=', raw.employee_id, 'raw.status=', raw.status);
 
     const myEmpId = empIdOf(req);
     const isOwner = raw.employee_id === myEmpId;
@@ -206,19 +211,25 @@ router.patch('/:id', requireAuth, async (req, res) => {
     // Owners may still PATCH their own pending document (e.g. for future cancel-by-status flow),
     // but cannot self-approve.
     if (kind === 'document') {
+      console.log('[PATCH /requests/:id] DOCUMENT branch — myEmpId=', myEmpId, 'isOwner=', isOwner);
       if (req.user.role !== 'admin' && !isOwner) {
+        console.warn('[PATCH /requests/:id] DOCUMENT forbidden — not admin and not owner');
         return res.status(403).json({ error: 'forbidden' });
       }
       const status = req.body?.status;
       if (status && !['pending', 'approved', 'rejected'].includes(status)) {
+        console.warn('[PATCH /requests/:id] DOCUMENT bad status=', status);
         return res.status(400).json({ error: 'bad status' });
       }
       if (status && (status === 'approved' || status === 'rejected') && req.user.role !== 'admin') {
+        console.warn('[PATCH /requests/:id] DOCUMENT non-admin trying to approve/reject');
         return res.status(403).json({ error: 'document requests can only be approved by admin' });
       }
       const updates = {};
       if (status) updates.status = status;
+      console.log('[PATCH /requests/:id] DOCUMENT calling updater with updates=', JSON.stringify(updates), 'approverEmpId=', myEmpId);
       const result = await updater(req.params.id, updates, myEmpId);
+      console.log('[PATCH /requests/:id] DOCUMENT updater returned status=', result?.status);
       return res.json(result);
     }
 
@@ -261,6 +272,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
     const result = await updater(req.params.id, updates, myEmpId);
     res.json(result);
   } catch (err) {
+    console.error('[PATCH /requests/:id] ERROR id=', req.params.id, 'msg=', err.message, '\n', err.stack);
     res.status(500).json({ error: err.message });
   }
 });

@@ -89,13 +89,35 @@ function computeTenureText(startDate) {
   return mo > 0 ? `${y} ปี ${mo} เดือน` : `${y} ปี`;
 }
 
-function toDateKey(v) { return v ? String(v).slice(0, 10) : ''; }
+// All times in this app are expressed in Asia/Bangkok (UTC+7) — pin the timezone
+// so it doesn't matter whether the Node runtime is UTC (Render default) or local.
+const APP_TZ = 'Asia/Bangkok';
+const APP_TZ_OFFSET = '+07:00';
+
+// Convert a "YYYY-MM-DD" + "HH:MM" pair (user-entered, Bangkok local) to a
+// UTC ISO string suitable for storing in timestamptz columns.
+function toBangkokISOString(dateKey, timeStr) {
+  return new Date(`${dateKey}T${timeStr}:00${APP_TZ_OFFSET}`).toISOString();
+}
+
+function toDateKey(v) {
+  if (!v) return '';
+  const s = String(v);
+  // DATE column comes back as 'YYYY-MM-DD' already — keep as is.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return s.slice(0, 10);
+  // sv-SE locale formats date as ISO (YYYY-MM-DD) — pin to Bangkok TZ.
+  return d.toLocaleDateString('sv-SE', { timeZone: APP_TZ });
+}
 
 function toTimeStr(ts) {
   if (!ts) return '';
   const d = new Date(ts);
   if (isNaN(d.getTime())) return '';
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return d.toLocaleTimeString('en-GB', {
+    hour: '2-digit', minute: '2-digit', hour12: false, timeZone: APP_TZ,
+  });
 }
 
 // ─── Profile mapper: raw Supabase rows → API shape ────────────────────────────
@@ -1067,6 +1089,7 @@ export async function usedDaysThisYear(empId, leaveLabel, yearPrefix) {
     .select('total_days, leave_request_periods(leave_date)')
     .eq('employee_id', empId)
     .eq('leave_type_id', ltId)
+    .is('deleted_at', null)
     .in('status', ['approved', 'pending']);
 
   let used = 0;
@@ -1159,7 +1182,7 @@ export async function createCheckin(body, empId) {
   const lat        = locIsObj ? (loc.lat ?? null) : null;
   const lng        = locIsObj ? (loc.lng ?? null) : null;
   const addr       = typeof loc === 'string' ? loc : (locIsObj ? (loc.address || '') : '');
-  const ts         = new Date(`${dateKey}T${timeStr}:00`).toISOString();
+  const ts         = toBangkokISOString(dateKey, timeStr);
 
   if (type === 'checkout') {
     const { data: existing } = await sb.from('attendances')
@@ -1198,14 +1221,14 @@ export async function updateCheckin(attId, body) {
   if (body.dateKey !== undefined) upd.work_date = body.dateKey;
   if (body.time    !== undefined) {
     const dateStr = body.dateKey || toDateKey(att.work_date);
-    upd.check_in_at = new Date(`${dateStr}T${body.time}:00`).toISOString();
+    upd.check_in_at = toBangkokISOString(dateStr, body.time);
   }
   if (body.notes !== undefined) upd.notes = body.notes;
   if (body.note  !== undefined) upd.notes = body.note;
   if (body.checkOutTime !== undefined) {
     if (body.checkOutTime) {
       const dateStr = body.dateKey || toDateKey(att.work_date);
-      upd.check_out_at = new Date(`${dateStr}T${body.checkOutTime}:00`).toISOString();
+      upd.check_out_at = toBangkokISOString(dateStr, body.checkOutTime);
     } else {
       upd.check_out_at = null;
     }
@@ -1521,6 +1544,18 @@ export async function deleteAttendanceExceptionRequest(reqId, isAdmin = false) {
 
 // ─── Document requests ───────────────────────────────────────────────────────
 
+// Document workflow uses different status values in the DB (pending/ready/collected/rejected)
+// than the generic admin UI vocabulary (pending/approved/rejected). Translate at the boundary
+// so callers (admin Requests page) keep using the generic vocabulary.
+function docDbStatusToApi(s) {
+  if (s === 'ready' || s === 'collected') return 'approved';
+  return s;
+}
+function docApiStatusToDb(s) {
+  if (s === 'approved') return 'ready';
+  return s;
+}
+
 function parseDocumentRequest(r, empMap = {}) {
   if (!r) return null;
   const emp = empMap[r.employee_id] || {};
@@ -1538,7 +1573,7 @@ function parseDocumentRequest(r, empMap = {}) {
     subType:      typeRow.name_th || '',
     detail:       [typeRow.name_th, r.purpose].filter(Boolean).join(' · '),
     purpose:      r.purpose || '',
-    status:       r.status,
+    status:       docDbStatusToApi(r.status),
     date:         toDateKey(r.created_at) || '',
     dateKey:      toDateKey(r.created_at) || '',
     startDateKey: '',
@@ -1624,23 +1659,34 @@ export async function createDocumentRequest(body, empId) {
 }
 
 export async function updateDocumentRequest(reqId, updates, approverEmpId) {
+  console.log('[updateDocumentRequest] START reqId=', reqId, 'updates=', JSON.stringify(updates), 'approverEmpId=', approverEmpId);
   const sb = supabase();
   const upd = {};
   if (updates.status) {
-    upd.status = updates.status;
+    upd.status = docApiStatusToDb(updates.status);
     if (updates.status === 'approved') {
       upd.processed_by_employee_id = approverEmpId;
       upd.ready_at = new Date().toISOString();
-      await sb.from('approvals').insert({ request_type: 'document', request_id: reqId, approver_employee_id: approverEmpId, action: 'approved' });
+      const { error: aErr } = await sb.from('approvals').insert({ request_type: 'document', request_id: reqId, approver_employee_id: approverEmpId, action: 'approved' });
+      if (aErr) console.error('[updateDocumentRequest] approvals.insert error:', aErr.message, aErr.details, aErr.hint);
+      else console.log('[updateDocumentRequest] approvals.insert OK (approved)');
     } else if (updates.status === 'rejected') {
-      await sb.from('approvals').insert({ request_type: 'document', request_id: reqId, approver_employee_id: approverEmpId, action: 'rejected' });
+      const { error: aErr } = await sb.from('approvals').insert({ request_type: 'document', request_id: reqId, approver_employee_id: approverEmpId, action: 'rejected' });
+      if (aErr) console.error('[updateDocumentRequest] approvals.insert error:', aErr.message, aErr.details, aErr.hint);
+      else console.log('[updateDocumentRequest] approvals.insert OK (rejected)');
     }
   }
   if (Object.keys(upd).length) {
-    await sb.from('document_requests')
+    const { error: uErr } = await sb.from('document_requests')
       .update({ ...upd, updated_at: new Date().toISOString() }).eq('id', reqId);
+    if (uErr) console.error('[updateDocumentRequest] document_requests.update error:', uErr.message, uErr.details, uErr.hint);
+    else console.log('[updateDocumentRequest] document_requests.update OK upd=', JSON.stringify(upd));
+  } else {
+    console.warn('[updateDocumentRequest] nothing to update (no upd keys)');
   }
-  return getDocumentRequestById(reqId);
+  const result = await getDocumentRequestById(reqId);
+  console.log('[updateDocumentRequest] DONE returning status=', result?.status);
+  return result;
 }
 
 export async function deleteDocumentRequest(reqId, isAdmin = false) {
