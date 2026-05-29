@@ -1,12 +1,8 @@
 import { Router } from 'express';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
 import { requireAuth, requireAdmin } from '../auth.js';
+import { db } from '../supabase/client.js';
 
 const router = Router();
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const SETTINGS_PATH = join(__dirname, '../data/settings.json');
 
 const DEFAULT_COMPANY = {
   nameTh: 'บริษัท แฮนด์ วิสาหกิจเพื่อสังคม จำกัด',
@@ -25,39 +21,48 @@ const DEFAULT_BENEFITS = {
   equipment: { titleTh: 'การเบิกอุปกรณ์ทำงาน', titleEn: 'Work Equipment Allowance', icon: 'equipment', status: 'active', detail: 'เบิกได้ 10,000 บาท/ปี' },
 };
 
-function readSettings() {
-  try {
-    if (existsSync(SETTINGS_PATH)) return JSON.parse(readFileSync(SETTINGS_PATH, 'utf8'));
-  } catch { /* ignore */ }
-  return {};
+async function readSettings() {
+  const sb = db();
+  const { data, error } = await sb
+    .from('app_settings')
+    .select('key, value')
+    .in('key', ['company', 'benefits']);
+  if (error) throw new Error(error.message);
+  const out = {};
+  for (const row of (data || [])) out[row.key] = row.value;
+  return out;
 }
 
-function writeSettings(data) {
-  writeFileSync(SETTINGS_PATH, JSON.stringify(data, null, 2), 'utf8');
+async function upsertSetting(key, value) {
+  const sb = db();
+  const { error } = await sb
+    .from('app_settings')
+    .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+  if (error) throw new Error(error.message);
 }
 
 function buildResponse(saved) {
   return {
-    company: { ...DEFAULT_COMPANY, ...(saved.company || {}) },
+    company:  { ...DEFAULT_COMPANY,  ...(saved.company  || {}) },
     benefits: { ...DEFAULT_BENEFITS, ...(saved.benefits || {}) },
   };
 }
 
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
-    res.json(buildResponse(readSettings()));
+    res.json(buildResponse(await readSettings()));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.patch('/', requireAuth, requireAdmin, (req, res) => {
+router.patch('/', requireAuth, requireAdmin, async (req, res) => {
   try {
-    const saved = readSettings();
-    if (req.body.company !== undefined) saved.company = req.body.company;
-    if (req.body.benefits !== undefined) saved.benefits = req.body.benefits;
-    writeSettings(saved);
-    res.json(buildResponse(saved));
+    const ops = [];
+    if (req.body.company   !== undefined) ops.push(upsertSetting('company',  req.body.company));
+    if (req.body.benefits  !== undefined) ops.push(upsertSetting('benefits', req.body.benefits));
+    await Promise.all(ops);
+    res.json(buildResponse(await readSettings()));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
