@@ -1348,7 +1348,11 @@ export async function updateEntitlement(empId, body) {
       const carryOver = Math.max(0, Math.min(20, Number(body._annualCarryOver)));
       const { data: ex } = await sb.from('leave_balances').select('id')
         .eq('employee_id', empId).eq('leave_type_id', ltId).eq('period_year', year).maybeSingle();
-      if (ex) await sb.from('leave_balances').update({ carry_over_days: carryOver }).eq('id', ex.id);
+      if (ex) {
+        await sb.from('leave_balances').update({ carry_over_days: carryOver }).eq('id', ex.id);
+      } else {
+        await sb.from('leave_balances').insert({ employee_id: empId, leave_type_id: ltId, period_year: year, entitled_days: 0, carry_over_days: carryOver });
+      }
     }
   }
 }
