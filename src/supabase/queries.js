@@ -1278,7 +1278,7 @@ export async function getEntitlementForEmployee(empId, startDate) {
     const balance = (balances || []).find(b => b.leave_types?.code === code);
 
     if (t.id === 'annual') {
-      const tenureYears = computeTenureYears(startDate);
+      const tenureYears = computeTenureYears(startDate, new Date(year, 0, 1));
       const annualBase  = annualQuotaForTenure(tenureYears);
       const carryOver   = Number(balance?.carry_over_days) || 0;
       out[t.id]          = annualBase + carryOver;
@@ -1373,7 +1373,7 @@ export async function snapshotAnnualCarry(yearPrefix) {
   const summary = [];
   for (const emp of (emps || [])) {
     const startDate    = (emp.employee_employments || [])[0]?.start_date;
-    const tenureYears  = computeTenureYears(startDate);
+    const tenureYears  = computeTenureYears(startDate, new Date(year, 0, 1));
     const annualBase   = annualQuotaForTenure(tenureYears);
 
     const { data: balance } = await sb.from('leave_balances').select('id, carry_over_days')
