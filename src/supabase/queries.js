@@ -1279,7 +1279,9 @@ export async function getEntitlementForEmployee(empId, startDate) {
 
     if (t.id === 'annual') {
       const tenureYears = computeTenureYears(startDate, new Date(year, 0, 1));
-      const annualBase  = annualQuotaForTenure(tenureYears);
+      const tenureBase  = annualQuotaForTenure(tenureYears);
+      // Use admin-saved value if exists, otherwise fall back to tenure-based
+      const annualBase  = balance?.entitled_days != null ? Number(balance.entitled_days) : tenureBase;
       const carryOver   = Number(balance?.carry_over_days) || 0;
       out[t.id]          = annualBase + carryOver;
       out._annualBase    = annualBase;
