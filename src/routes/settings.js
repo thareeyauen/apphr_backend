@@ -14,11 +14,11 @@ const DEFAULT_COMPANY = {
 };
 
 const DEFAULT_BENEFITS = {
-  socialSecurity: { titleTh: 'ประกันสังคม', titleEn: 'Social Security', icon: 'socialSecurity', status: 'active', detail: 'นายจ้างและลูกจ้างสมทบฝ่ายละ 5% ของค่าจ้าง (สูงสุด 750 บาท/เดือน)' },
-  groupInsurance: { titleTh: 'ประกันกลุ่ม', titleEn: 'Group Insurance', icon: 'groupInsurance', status: 'active', detail: 'วงเงิน 100,000 บาท/ปี ครอบคลุม OPD/IPD' },
-  suit: { titleTh: 'การเบิกชุดสูท', titleEn: 'Suit Allowance', icon: 'suit', status: 'active', detail: 'เบิกได้ 5,000 บาท/ปี' },
-  workWear: { titleTh: 'การเบิกชุดทำงาน', titleEn: 'Work Uniform Allowance', icon: 'workWear', status: 'active', detail: 'เบิกได้ 3,000 บาท/ปี' },
-  equipment: { titleTh: 'การเบิกอุปกรณ์ทำงาน', titleEn: 'Work Equipment Allowance', icon: 'equipment', status: 'active', detail: 'เบิกได้ 10,000 บาท/ปี' },
+  socialSecurity: { titleTh: 'ประกันสังคม', titleEn: 'Social Security', icon: 'socialSecurity', status: 'active', detail: 'นายจ้างและลูกจ้างสมทบฝ่ายละ 5% ของค่าจ้าง (สูงสุด 825 บาท/เดือน)' },
+  groupInsurance: { titleTh: 'ประกันกลุ่ม', titleEn: 'Group Insurance', icon: 'groupInsurance', status: 'active', detail: 'สิทธิประกันกลุ่มจะมีให้เป็นไปตามกรมธรรม์เลขที่ 0000130774-100' },
+  suit: { titleTh: 'การเบิกชุดสูท', titleEn: 'Suit Allowance', icon: 'suit', status: 'inactive', detail: 'เบิกได้ 3,000 บาท/ปี' },
+  workWear: { titleTh: 'การเบิกชุดทำงาน', titleEn: 'Work Uniform Allowance', icon: 'workWear', status: 'active', detail: 'พนักงานที่ผ่านการทดลองงานจะได้รับเสื้อบริษัท (เสื้อคอกลม หรือเสื้อโปโล Logo บริษัท) จำนวนไม่น้อยกว่า 1 ตัว' },
+  equipment: { titleTh: 'การเบิกอุปกรณ์ทำงาน', titleEn: 'Work Equipment Allowance', icon: 'equipment', status: 'active', detail: 'พนักงานมีสิทธิขอรับอุปกรณ์ในการทำงานได้โดยฝ่ายงานพิจารณาอนุมัติเป็นรายบุคคล' },
 };
 
 async function readSettings() {
