@@ -44,7 +44,10 @@ async function upsertSetting(key, value) {
 function buildResponse(saved) {
   return {
     company:  { ...DEFAULT_COMPANY,  ...(saved.company  || {}) },
-    benefits: { ...DEFAULT_BENEFITS, ...(saved.benefits || {}) },
+    // Once admin has saved benefits (even an empty object), respect their choice
+    // exactly — don't merge DEFAULT_BENEFITS back in, or deleted default items
+    // would resurrect on next fetch.
+    benefits: saved.benefits ?? DEFAULT_BENEFITS,
   };
 }
 
